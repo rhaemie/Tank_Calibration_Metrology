@@ -1,0 +1,172 @@
+# -----------------------------------------------------------
+# HORIZONTAL TANK CALIBRATION – STATISTICAL DIAGNOSTICS (Enhanced + Geometry Input)
+# -----------------------------------------------------------
+# Features:
+#   - Prompts user for R (radius), L (length), and internal height h_max
+#   - Reads input_data.csv (height, volume)
+#   - Computes theoretical volume V_expected(h) for a flat-ended horizontal cylinder
+#   - Computes residuals ε₁ = V_measured - V_expected
+#   - Calculates diagnostics and produces annotated plots
+# -----------------------------------------------------------
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import norm, skew, kurtosis, shapiro, pearsonr
+
+# -----------------------------------------------------------
+# 1. User Input for Tank Geometry
+# -----------------------------------------------------------
+print("=== Enter Tank Geometry Parameters ===")
+R = float(input("Enter internal radius R (in cm): "))
+L = float(input("Enter cylindrical length L (in cm): "))
+h_max = float(input("Enter maximum measured liquid height (internal diameter) h_max (in cm): "))
+
+# -----------------------------------------------------------
+# 2. Load data
+# -----------------------------------------------------------
+df = pd.read_csv("input_data.csv")
+df = df[['height', 'volume']].dropna()
+
+h = df['height'].values
+V_measured = df['volume'].values
+
+# -----------------------------------------------------------
+# 3. Compute theoretical (expected) volume for each height
+# -----------------------------------------------------------
+def theoretical_volume(h, R, L):
+    """Compute theoretical volume for horizontal cylindrical tank with flat ends."""
+    A = R**2 * np.arccos((R - h) / R) - (R - h) * np.sqrt(2 * R * h - h**2)
+    V = A * L  # Volume in cubic cm
+    return V / 1000.0  # Convert to litres (1 cm³ = 0.001 L)
+
+V_expected = np.array([theoretical_volume(x, R, L) for x in h])
+residuals = V_measured - V_expected
+
+# -----------------------------------------------------------
+# 4. Statistical diagnostics
+# -----------------------------------------------------------
+mean_bias = np.mean(residuals)
+sample_sd = np.std(residuals, ddof=1)
+rmse = np.sqrt(np.mean(residuals**2))
+skewness = skew(residuals)
+kurt = kurtosis(residuals)
+shapiro_stat, shapiro_p = shapiro(residuals)
+corr_h_eps, corr_p = pearsonr(h, residuals)
+
+# Identify outliers (|ε| > 3σ)
+outlier_mask = np.abs(residuals) > 3 * sample_sd
+outliers = df[outlier_mask]
+
+# -----------------------------------------------------------
+# 5. Print diagnostics
+# -----------------------------------------------------------
+print("\n=== CALIBRATION DIAGNOSTICS SUMMARY ===")
+print(f"Mean Bias (μ_ε): {mean_bias:.6f} L")
+print(f"Sample Standard Deviation (s): {sample_sd:.6f} L")
+print(f"Root Mean Square Error (RMSE): {rmse:.6f} L")
+print(f"Skewness: {skewness:.6f}")
+print(f"Kurtosis (excess): {kurt:.6f}")
+print(f"Shapiro–Wilk p-value: {shapiro_p:.6f}")
+print(f"Residual–Height Correlation (r): {corr_h_eps:.6f}  (p = {corr_p:.6f})")
+
+if len(outliers) > 0:
+    print("\nOutliers (|ε| > 3σ):")
+    print(outliers)
+else:
+    print("\nNo statistical outliers detected (|ε| ≤ 3σ).")
+
+# -----------------------------------------------------------
+# 6. Annotated PLOTS with 5–6 reference points each
+# -----------------------------------------------------------
+
+# --- (a) Normal Distribution of Measured Volumes ---
+mean_vol = np.mean(V_measured)
+std_vol = np.std(V_measured)
+x_vol = np.linspace(min(V_measured), max(V_measured), 300)
+pdf_vol = norm.pdf(x_vol, mean_vol, std_vol)
+
+plt.figure(figsize=(8,5))
+plt.plot(x_vol, pdf_vol, 'b', label=r'Normal PDF of $V_{measured}$')
+plt.axvline(mean_vol, color='r', linestyle='--', label=rf'Mean ($\mu$) = {mean_vol:.2f}')
+plt.axvline(mean_vol + std_vol, color='g', linestyle='--', label=r'+1$\sigma$')
+plt.axvline(mean_vol - std_vol, color='g', linestyle='--', label=r'−1$\sigma$')
+
+critical_points = [np.min(V_measured), mean_vol - std_vol, mean_vol, mean_vol + std_vol, np.max(V_measured)]
+for cp in critical_points:
+    plt.scatter(cp, norm.pdf(cp, mean_vol, std_vol), color='k')
+    plt.text(cp, norm.pdf(cp, mean_vol, std_vol)*1.05, f"{cp:.1f}", ha='center', fontsize=9)
+
+plt.xlabel("Volume (L)")
+plt.ylabel("Probability Density")
+plt.title("Normal Distribution of Measured Volumes")
+plt.legend()
+plt.grid(alpha=0.6)
+plt.tight_layout()
+plt.savefig("plot1_Vmeasured_distribution_annotated.png", dpi=300)
+plt.show()
+
+# --- (b) Normal Distribution of Residuals ε₁ ---
+x_eps = np.linspace(min(residuals), max(residuals), 300)
+pdf_eps = norm.pdf(x_eps, mean_bias, sample_sd)
+
+plt.figure(figsize=(8,5))
+plt.plot(x_eps, pdf_eps, 'purple', label=r'Normal PDF of $\varepsilon_1$')
+plt.axvline(mean_bias, color='r', linestyle='--', label=rf'Mean ($\mu_\varepsilon$) = {mean_bias:.3f}')
+plt.axvline(mean_bias + sample_sd, color='g', linestyle='--', label=r'+1$\sigma_\varepsilon$')
+plt.axvline(mean_bias - sample_sd, color='g', linestyle='--', label=r'−1$\sigma_\varepsilon$')
+
+critical_eps = [np.min(residuals), mean_bias - sample_sd, mean_bias, mean_bias + sample_sd, np.max(residuals)]
+for cp in critical_eps:
+    plt.scatter(cp, norm.pdf(cp, mean_bias, sample_sd), color='k')
+    plt.text(cp, norm.pdf(cp, mean_bias, sample_sd)*1.1, f"{cp:.2f}", ha='center', fontsize=9)
+
+plt.xlabel("Residuals (L)")
+plt.ylabel("Probability Density")
+plt.title("Normal Distribution of Residuals (ε₁)")
+plt.legend()
+plt.grid(alpha=0.6)
+plt.tight_layout()
+plt.savefig("plot2_residual_distribution_annotated.png", dpi=300)
+plt.show()
+
+# --- (c) Residuals vs Height ---
+plt.figure(figsize=(8,5))
+plt.scatter(h, residuals, color='teal', alpha=0.7, label='Residuals')
+plt.axhline(0, color='r', linestyle='--', label='Zero Bias Line')
+
+highlight_idx = np.linspace(0, len(h)-1, 6, dtype=int)
+for i in highlight_idx:
+    plt.scatter(h[i], residuals[i], color='k')
+    plt.text(h[i], residuals[i]*1.05, f"h={h[i]:.1f}", fontsize=8)
+
+plt.xlabel("Height (cm)")
+plt.ylabel("Residuals ε₁ (L)")
+plt.title("Residuals vs Height")
+plt.legend()
+plt.grid(alpha=0.6)
+plt.tight_layout()
+plt.savefig("plot3_residuals_vs_height_annotated.png", dpi=300)
+plt.show()
+
+# --- (d) Histogram of Residuals with Fitted Normal Curve ---
+plt.figure(figsize=(8,5))
+plt.hist(residuals, bins=15, density=True, alpha=0.6, color='skyblue', edgecolor='k', label='Residuals')
+plt.plot(x_eps, pdf_eps, 'r--', label='Fitted Normal PDF')
+
+for cp in critical_eps:
+    plt.scatter(cp, norm.pdf(cp, mean_bias, sample_sd), color='k')
+    plt.text(cp, norm.pdf(cp, mean_bias, sample_sd)*1.05, f"{cp:.2f}", ha='center', fontsize=8)
+
+plt.xlabel("Residuals (L)")
+plt.ylabel("Density")
+plt.title("Histogram of Residuals with Annotated Fitted Normal Curve")
+plt.legend()
+plt.grid(alpha=0.6)
+plt.tight_layout()
+plt.savefig("plot4_residual_histogram_annotated.png", dpi=300)
+plt.show()
+
+# -----------------------------------------------------------
+# END OF SCRIPT
+# -----------------------------------------------------------
