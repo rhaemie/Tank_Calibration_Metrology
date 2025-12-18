@@ -1,0 +1,79 @@
+import argparse
+import numpy as np
+import csv
+from datetime import datetime
+import pandas as pd
+
+# Parse the command-line arguments
+parser = argparse.ArgumentParser()
+parser.add_argument('-i', '--input', required=True, help='input CSV file')
+args = parser.parse_args()
+
+# Check if the input file was specified
+if not args.input:
+    print('Error: No input file specified')
+    exit()
+
+# Open the CSV file and read the data into a list of tuples
+data = []
+with open(args.input, 'r') as csvfile:
+    csvreader = csv.reader(csvfile)
+    for row in csvreader:
+        try:
+            x, y = map(float, row)
+            x = round(x, 1)  # Reduce the number of decimal places to one
+            y = round(y, 1)  # Reduce the number of decimal places to one for column 2 as well
+            data.append((x, y))
+        except ValueError:
+            continue
+
+# Create arrays of x and y values
+x = np.array([p[0] for p in data])
+y = np.array([p[1] for p in data])
+
+# Define a function to perform linear interpolation between two points
+def interpolate(x0, y0, x1, y1, x):
+    return round(y0 + (y1 - y0) * (x - x0) / (x1 - x0), 1)  # Round the interpolated value to one decimal place
+
+# Sort the data based on x values before interpolation
+data.sort(key=lambda point: point[0])
+
+# Loop through the data and perform linear interpolation with increments of 0.1 for column 1
+interpolated_data = []
+for i in range(len(data) - 1):
+    x0, y0 = data[i]
+    x1, y1 = data[i+1]
+    x_range = np.arange(x0, x1, 0.1)
+    for j in x_range:
+        y = interpolate(x0, y0, x1, y1, j)
+        interpolated_data.append((round(j, 1), y))  # Reduce the number of decimal places to one in column 1
+    interpolated_data.append((x1, y1))
+
+# Remove duplicates for each x, y pair
+unique_interpolated_data = []
+seen_pairs = set()
+for pair in interpolated_data:
+    if pair not in seen_pairs:
+        unique_interpolated_data.append(pair)
+        seen_pairs.add(pair)
+
+# Write the interpolated data to a CSV file
+with open('interpolated_data.csv', 'w', newline='') as csvfile:
+    csvwriter = csv.writer(csvfile)
+    csvwriter.writerows(unique_interpolated_data)
+
+# Prompt the user to upload the input CSV file for code 2
+print("Upload the input CSV file for code 2:")
+input_file = input()
+
+# Read data from the CSV file for code 2
+df = pd.read_csv(input_file)
+
+# Perform operations for code 2
+values = df['volume'].tolist()
+total_values = len(values)
+grouped_values = [values[i:i+10] for i in range(0, total_values, 10)]
+grouped_df = pd.DataFrame(grouped_values)
+
+# Save the grouped data as a CSV file named "calibration chart"
+grouped_df.to_csv('calibration_chart.csv', index=False)
